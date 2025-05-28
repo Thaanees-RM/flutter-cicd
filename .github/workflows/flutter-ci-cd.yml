@@ -1,0 +1,63 @@
+name: Flutter CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      FIREBASE_APP_ID_ANDROID: ${{ secrets.FIREBASE_APP_ID_ANDROID }}
+      FIREBASE_APP_ID_WEB: ${{ secrets.FIREBASE_APP_ID_WEB }}
+      FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.32.0'
+
+      - name: Cache Pub packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Analyze code
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Build APK (Android)
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
+        run: flutter build apk --release
+
+      - name: Upload APK to Firebase App Distribution
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
+        run: |
+          firebase appdistribution:distribute build/app/outputs/flutter-apk/app-release.apk \
+            --app $FIREBASE_APP_ID_ANDROID \
+            --groups "testers" \
+            --token $FIREBASE_TOKEN
+
+      - name: Build Web
+        run: flutter build web --release
+
+      - name: Deploy Web to Firebase Hosting
+        run: firebase deploy --only hosting --token $FIREBASE_TOKEN
