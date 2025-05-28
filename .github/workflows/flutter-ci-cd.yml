@@ -1,41 +1,38 @@
-name: Flutter CI/CD Pipeline
+name: Flutter CI/CD
 
 on:
   push:
-    branches:
-      - main
-      - staging
+    branches: [dev, staging, main]
   pull_request:
-    branches:
-      - main
+    branches: [dev, staging, main]
 
 jobs:
-  build-test-deploy:
+  build-test:
+    name: Build & Test Flutter App
     runs-on: ubuntu-latest
 
-    env:
-      FIREBASE_APP_ID_ANDROID: ${{ secrets.FIREBASE_APP_ID_ANDROID }}
-      FIREBASE_APP_ID_WEB: ${{ secrets.FIREBASE_APP_ID_WEB }}
-      FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+    strategy:
+      matrix:
+        platform: [android, web]
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-      - name: Setup Flutter
+      - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.32.0'
 
-      - name: Cache Pub packages
+      - name: Cache Flutter SDK and Pub packages
         uses: actions/cache@v3
         with:
-          path: ~/.pub-cache
-          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pub-
+          path: |
+            ~/.pub-cache
+            ${{ env.FLUTTER_ROOT }}/bin/cache
+          key: ${{ runner.os }}-flutter-${{ hashFiles('**/pubspec.yaml') }}
 
-      - name: Flutter pub get
+      - name: Install dependencies
         run: flutter pub get
 
       - name: Analyze code
@@ -44,20 +41,66 @@ jobs:
       - name: Run tests
         run: flutter test
 
-      - name: Build APK (Android)
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
+      - name: Build Flutter app for ${{ matrix.platform }}
+        run: |
+          if [ "${{ matrix.platform }}" = "android" ]; then
+            flutter build apk --release
+          elif [ "${{ matrix.platform }}" = "web" ]; then
+            flutter build web
+          else
+            echo "Unsupported platform ${{ matrix.platform }}"
+            exit 1
+          fi
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform }}-build
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/web/
+
+  deploy:
+    name: Deploy to Firebase
+    needs: build-test
+    runs-on: ubuntu-latest
+
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
+
+    env:
+      FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+      FIREBASE_APP_ID_ANDROID: ${{ secrets.FIREBASE_APP_ID_ANDROID }}
+      FIREBASE_APP_ID_WEB: ${{ secrets.FIREBASE_APP_ID_WEB }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.32.0'
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Android APK
+        if: github.ref != 'refs/heads/dev'
         run: flutter build apk --release
 
-      - name: Upload APK to Firebase App Distribution
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'
+      - name: Build Web App
+        run: flutter build web
+
+      - name: Deploy Android APK to Firebase App Distribution
+        if: github.ref != 'refs/heads/dev'
         run: |
           firebase appdistribution:distribute build/app/outputs/flutter-apk/app-release.apk \
             --app $FIREBASE_APP_ID_ANDROID \
-            --groups "testers" \
+            --token $FIREBASE_TOKEN \
+            --groups "testers"
+
+      - name: Deploy Web App to Firebase Hosting
+        run: |
+          firebase deploy --only hosting \
             --token $FIREBASE_TOKEN
 
-      - name: Build Web
-        run: flutter build web --release
-
-      - name: Deploy Web to Firebase Hosting
-        run: firebase deploy --only hosting --token $FIREBASE_TOKEN
