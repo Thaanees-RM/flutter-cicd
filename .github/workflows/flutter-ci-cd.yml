@@ -103,6 +103,7 @@ jobs:
             --groups "testers"
 
       - name: Deploy Web App to Firebase Hosting
+        working-directory: ./
         run: |
           firebase deploy --only hosting \
             --token $FIREBASE_TOKEN
