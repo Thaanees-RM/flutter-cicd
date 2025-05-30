@@ -1,0 +1,34 @@
+workflows:
+  flutter-app-distribution:
+    name: Flutter CI/CD for Android
+    max_build_duration: 45
+    environment:
+      flutter: stable
+      vars:
+        FIREBASE_TOKEN: Encrypted:your_token_here
+        FIREBASE_APP_ID_ANDROID: your_android_app_id
+    scripts:
+      - name: Install dependencies
+        script: |
+          flutter pub get
+      - name: Run analyzer
+        script: |
+          flutter analyze
+      - name: Run unit tests
+        script: |
+          flutter test
+      - name: Build APK
+        script: |
+          flutter build apk --release
+      - name: Distribute to Firebase
+        script: |
+          firebase appdistribution:distribute build/app/outputs/flutter-apk/app-release.apk \
+            --app $FIREBASE_APP_ID_ANDROID \
+            --token $FIREBASE_TOKEN \
+            --groups "testers"
+    artifacts:
+      - build/app/outputs/flutter-apk/app-release.apk
+    publishing:
+      email:
+        recipients:
+          - thaaneesrafeek11@gmail.com
